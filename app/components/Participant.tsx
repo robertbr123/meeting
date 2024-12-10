@@ -5,6 +5,7 @@ import { combineLatest, fromEvent, map, of, switchMap } from 'rxjs'
 import { useSubscribedState } from '~/hooks/rxjsHooks'
 import { useDeadPulledTrackMonitor } from '~/hooks/useDeadPulledTrackMonitor'
 import { useRoomContext } from '~/hooks/useRoomContext'
+import { screenshareSuffix } from '~/hooks/useStageManager'
 import { useUserMetadata } from '~/hooks/useUserMetadata'
 import type { User } from '~/types/Messages'
 import isNonNullable from '~/utils/isNonNullable'
@@ -15,7 +16,6 @@ import { cn } from '~/utils/style'
 import { usePulledVideoTrack } from '../hooks/usePulledVideoTrack'
 import { AudioGlow } from './AudioGlow'
 import { AudioIndicator } from './AudioIndicator'
-import { Button } from './Button'
 import {
 	ConnectionIndicator,
 	getConnectionQuality,
@@ -48,14 +48,13 @@ function useMid(track?: MediaStreamTrack) {
 }
 
 interface Props {
-	id: string
 	user: User
 }
 
 export const Participant = forwardRef<
 	HTMLDivElement,
 	JSX.IntrinsicElements['div'] & Props
->(({ id, user }, ref) => {
+>(({ user }, ref) => {
 	const { data } = useUserMetadata(user.name)
 	const {
 		traceLink,
@@ -64,21 +63,22 @@ export const Participant = forwardRef<
 		pinnedTileIds,
 		setPinnedTileIds,
 		showDebugInfo,
+		userMedia,
 		room: { identity },
 	} = useRoomContext()
 	const peerConnection = useSubscribedState(peer.peerConnection$)
-
-	const isScreenShare = id.includes('screenshare')
-	const audioTrack = usePulledAudioTrack(
+	const id = user.id
+	const isSelf = identity && id.startsWith(identity.id)
+	const isScreenShare = id.endsWith(screenshareSuffix)
+	const pulledAudioTrack = usePulledAudioTrack(
 		isScreenShare ? undefined : user.tracks.audio
 	)
-	const videoTrack = usePulledVideoTrack(
-		dataSaverMode
-			? undefined
-			: isScreenShare
-				? user.tracks.screenshare
-				: user.tracks.video
+	const pulledVideoTrack = usePulledVideoTrack(
+		!isScreenShare && dataSaverMode ? undefined : user.tracks.video
 	)
+	const audioTrack = isSelf ? userMedia.audioStreamTrack : pulledAudioTrack
+	const videoTrack =
+		isSelf && !isScreenShare ? userMedia.videoStreamTrack : pulledVideoTrack
 
 	useDeadPulledTrackMonitor(
 		user.tracks.video,
@@ -97,11 +97,10 @@ export const Participant = forwardRef<
 	)
 
 	const pinned = pinnedTileIds.includes(id)
-	const isSelf = user === identity
 
 	useEffect(() => {
 		if (isScreenShare) {
-			setPinnedTileIds([id])
+			setPinnedTileIds((ids) => [...ids, id])
 		}
 	}, [id, isScreenShare, setPinnedTileIds])
 
@@ -128,9 +127,7 @@ export const Participant = forwardRef<
 				<div
 					className={cn(
 						'h-full mx-auto overflow-hidden text-white opacity-0 animate-fadeIn',
-						pinned
-							? 'absolute inset-0 h-full w-full z-10 rounded-none bg-black'
-							: 'relative max-w-[--participant-max-width] rounded-xl'
+						'relative max-w-[--participant-max-width] rounded-xl'
 					)}
 				>
 					{!isScreenShare && (
@@ -183,26 +180,32 @@ export const Participant = forwardRef<
 						)}
 						videoTrack={videoTrack}
 					/>
-					<HoverFade className="absolute inset-0 grid w-full h-full place-items-center">
-						<div className="flex gap-2 p-2 rounded bg-zinc-900/30">
-							<Tooltip content={pinned ? 'Restore' : 'Maximize'}>
-								<Button
-									onClick={() => setPinnedTileIds(pinned ? [] : [id])}
-									displayType="ghost"
-								>
-									<Icon type={pinned ? 'arrowsIn' : 'arrowsOut'} />
-								</Button>
-							</Tooltip>
-							{!isScreenShare && (
-								<MuteUserButton
-									displayType="ghost"
-									mutedDisplayType="ghost"
-									user={user}
-								/>
-							)}
-						</div>
-					</HoverFade>
-					{audioTrack && (
+					{!isScreenShare && (
+						<HoverFade className="absolute inset-0 grid w-full h-full place-items-center">
+							<div className="flex gap-2 p-2 rounded bg-zinc-900/30">
+								{/* <Tooltip content={pinned ? 'Restore' : 'Maximize'}> */}
+								{/* 	<Button */}
+								{/* 		onClick={() => */}
+								{/* 			setPinnedTileIds((ids) => */}
+								{/* 				pinned ? ids.filter((i) => i !== id) : [...ids, id] */}
+								{/* 			) */}
+								{/* 		} */}
+								{/* 		displayType="ghost" */}
+								{/* 	> */}
+								{/* 		<Icon type={pinned ? 'arrowsIn' : 'arrowsOut'} /> */}
+								{/* 	</Button> */}
+								{/* </Tooltip> */}
+								{!isScreenShare && (
+									<MuteUserButton
+										displayType="ghost"
+										mutedDisplayType="ghost"
+										user={user}
+									/>
+								)}
+							</div>
+						</HoverFade>
+					)}
+					{audioTrack && !isScreenShare && (
 						<div className="absolute left-4 top-4">
 							{user.tracks.audioEnabled &&
 								user.tracks.videoEnabled &&
@@ -243,7 +246,7 @@ export const Participant = forwardRef<
 						</div>
 					)}
 					<div className="absolute top-0 right-0 flex gap-4 p-4">
-						{user.raisedHand && (
+						{user.raisedHand && !isScreenShare && (
 							<Tooltip content="Hand is raised">
 								<div className="relative">
 									<div className="relative">
@@ -258,7 +261,7 @@ export const Participant = forwardRef<
 							</Tooltip>
 						)}
 					</div>
-					{(user.speaking || user.raisedHand) && (
+					{(user.speaking || user.raisedHand) && !isScreenShare && (
 						<div
 							className={cn(
 								'pointer-events-none absolute inset-0 h-full w-full border-4 border-orange-400',
